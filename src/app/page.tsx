@@ -24,7 +24,7 @@ export default function Home() {
             <span>Backend</span>
             <h2>Node.js API</h2>
             <p>Folder: backend</p>
-            <code>npm run dev</code>
+            <code>npm run dev tyryteryt</code>
           </article>
         </section>
       </main>
