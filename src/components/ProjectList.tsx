@@ -36,59 +36,76 @@ export function ProjectList({
   projects,
   updatingProjectId,
 }: ProjectListProps) {
+  const archivedProjects = projects.filter((project) => project.archivedAt);
+  const activeProjects = projects.filter((project) => !project.archivedAt);
+  const renderProject = (project: Project) => (
+    <li key={project._id} className={styles.projectItem}>
+      <div className={styles.projectSummary}>
+        <div className={styles.projectTitleRow}>
+          <h3>{project.projectName}</h3>
+          {project.archivedAt ? <span className={styles.archiveBadge}>Archived</span> : null}
+        </div>
+        <p>{project.description || "No description provided."}</p>
+        <div className={styles.projectMeta}>
+          <span>Start: {formatDate(project.startDate)}</span>
+          <span>Due: {formatDate(project.dueDate)}</span>
+          <span>{project.members?.length || 0} members</span>
+        </div>
+        <Link className={styles.detailsLink} href={`/projects/${project._id}`}>
+          View details
+        </Link>
+      </div>
+      {canManageProjects ? (
+        <label className={styles.statusControl}>
+          Status
+          <select
+            value={project.status}
+            disabled={updatingProjectId === project._id || Boolean(project.archivedAt)}
+            onChange={(event) => onStatusChange(project._id, event.target.value as ProjectStatus)}
+          >
+            {statusOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <span className={styles.statusBadge}>{project.status}</span>
+      )}
+    </li>
+  );
+
   return (
     <div className={styles.listPanel}>
-      <div className={styles.listHeader}>
-        <h2>Saved projects</h2>
-        <span>{projects.length}</span>
-      </div>
-
       {isLoading ? (
         <p className={styles.empty}>Loading projects...</p>
       ) : projects.length === 0 ? (
         <p className={styles.empty}>No active projects available.</p>
       ) : (
-        <ul className={styles.list}>
-          {projects.map((project) => (
-            <li key={project._id} className={styles.projectItem}>
-              <div className={styles.projectSummary}>
-                <div className={styles.projectTitleRow}>
-                  <h3>{project.projectName}</h3>
-                  {project.archivedAt ? <span className={styles.archiveBadge}>Archived</span> : null}
-                </div>
-                <p>{project.description || "No description provided."}</p>
-                <div className={styles.projectMeta}>
-                  <span>Start: {formatDate(project.startDate)}</span>
-                  <span>Due: {formatDate(project.dueDate)}</span>
-                  <span>{project.members?.length || 0} members</span>
-                </div>
-                <Link className={styles.detailsLink} href={`/projects/${project._id}`}>
-                  View details
-                </Link>
+        <>
+          {archivedProjects.length ? (
+            <section className={styles.projectGroup}>
+              <div className={styles.listHeader}>
+                <h2>Archived projects</h2>
+                <span>{archivedProjects.length}</span>
               </div>
-              {canManageProjects ? (
-                <label className={styles.statusControl}>
-                  Status
-                  <select
-                    value={project.status}
-                    disabled={updatingProjectId === project._id || Boolean(project.archivedAt)}
-                    onChange={(event) =>
-                      onStatusChange(project._id, event.target.value as ProjectStatus)
-                    }
-                  >
-                    {statusOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <span className={styles.statusBadge}>{project.status}</span>
-              )}
-            </li>
-          ))}
-        </ul>
+              <ul className={styles.list}>{archivedProjects.map(renderProject)}</ul>
+            </section>
+          ) : null}
+
+          <section className={styles.projectGroup}>
+            <div className={styles.listHeader}>
+              <h2>Saved projects</h2>
+              <span>{activeProjects.length}</span>
+            </div>
+            {activeProjects.length ? (
+              <ul className={styles.list}>{activeProjects.map(renderProject)}</ul>
+            ) : (
+              <p className={styles.empty}>No active projects available.</p>
+            )}
+          </section>
+        </>
       )}
     </div>
   );

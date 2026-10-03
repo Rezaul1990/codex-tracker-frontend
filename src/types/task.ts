@@ -30,3 +30,26 @@ export type CreateTaskInput = {
 };
 
 export type UpdateTaskInput = Partial<CreateTaskInput>;
+
+export type TaskSearchFilters = {
+  archived?: "false" | "true" | "only";
+  assignee?: string;
+  dueFrom?: string;
+  dueTo?: string;
+  limit?: number;
+  page?: number;
+  priority?: "" | TaskPriority;
+  search?: string;
+  sort?: string;
+  status?: "" | TaskStatus;
+};
+
+export type PaginatedTasks = {
+  data: Task[];
+  meta?: {
+    limit: number;
+    page: number;
+    total: number;
+    totalPages: number;
+  };
+};

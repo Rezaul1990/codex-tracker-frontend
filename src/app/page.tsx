@@ -8,8 +8,16 @@ import { ProjectForm } from "@/components/ProjectForm";
 import { ProjectList } from "@/components/ProjectList";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { inviteUser } from "@/lib/authApi";
+import { getDashboardSummary } from "@/lib/dashboardApi";
+import {
+  getNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from "@/lib/notificationsApi";
 import { createProject, getProjects, updateProjectStatus } from "@/lib/projectsApi";
 import type { InvitationRole } from "@/types/auth";
+import type { DashboardSummary } from "@/types/dashboard";
+import type { Notification } from "@/types/notification";
 import type { CreateProjectInput, Project, ProjectStatus } from "@/types/project";
 import styles from "./page.module.css";
 
@@ -27,28 +35,49 @@ function Dashboard() {
   const [inviteUrl, setInviteUrl] = useState("");
   const [isInviting, setIsInviting] = useState(false);
   const [updatingProjectId, setUpdatingProjectId] = useState("");
+  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
+  const [dashboardMessage, setDashboardMessage] = useState("");
+  const [isLoadingDashboard, setIsLoadingDashboard] = useState(true);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationMessage, setNotificationMessage] = useState("");
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(true);
+  const [showArchivedProjects, setShowArchivedProjects] = useState(false);
 
   const fetchProjects = useCallback(async () => {
-    return getProjects();
-  }, []);
+    return getProjects(showArchivedProjects);
+  }, [showArchivedProjects]);
 
   useEffect(() => {
     let isMounted = true;
 
     const loadInitialProjects = async () => {
       try {
-        const savedProjects = await fetchProjects();
+        const [savedProjects, summary, notificationResult] = await Promise.all([
+          fetchProjects(),
+          getDashboardSummary(),
+          getNotifications(),
+        ]);
 
         if (isMounted) {
           setProjects(savedProjects);
+          setDashboardSummary(summary || null);
+          setNotifications(notificationResult.notifications);
+          setUnreadCount(notificationResult.unreadCount);
         }
       } catch (error) {
         if (isMounted) {
           setMessage(error instanceof Error ? error.message : "Could not load projects");
+          setDashboardMessage(error instanceof Error ? error.message : "Could not load dashboard");
+          setNotificationMessage(
+            error instanceof Error ? error.message : "Could not load notifications",
+          );
         }
       } finally {
         if (isMounted) {
           setIsLoading(false);
+          setIsLoadingDashboard(false);
+          setIsLoadingNotifications(false);
         }
       }
     };
@@ -68,6 +97,7 @@ function Dashboard() {
       await createProject(input);
       setIsLoading(true);
       setProjects(await fetchProjects());
+      setDashboardSummary((await getDashboardSummary()) || null);
       return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not create project");
@@ -75,6 +105,42 @@ function Dashboard() {
     } finally {
       setIsLoading(false);
       setIsSubmitting(false);
+    }
+  };
+
+  const handleMarkNotificationRead = async (notification: Notification) => {
+    if (notification.isRead) {
+      return;
+    }
+
+    try {
+      const updated = await markNotificationRead(notification._id);
+      if (updated) {
+        setNotifications((currentNotifications) =>
+          currentNotifications.map((currentNotification) =>
+            currentNotification._id === updated._id ? updated : currentNotification,
+          ),
+        );
+      }
+      setUnreadCount((currentCount) => Math.max(0, currentCount - 1));
+    } catch (error) {
+      setNotificationMessage(error instanceof Error ? error.message : "Could not update notification");
+    }
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await markAllNotificationsRead();
+      setNotifications((currentNotifications) =>
+        currentNotifications.map((notification) => ({
+          ...notification,
+          isRead: true,
+          readAt: notification.readAt || new Date().toISOString(),
+        })),
+      );
+      setUnreadCount(0);
+    } catch (error) {
+      setNotificationMessage(error instanceof Error ? error.message : "Could not update notifications");
     }
   };
 
@@ -168,6 +234,88 @@ function Dashboard() {
         </div>
       </section>
 
+      <section className={styles.dashboardGrid}>
+        <section className={styles.detailPanel}>
+          <div className={styles.listHeader}>
+            <h2>Dashboard</h2>
+            <span>{isLoadingDashboard ? "..." : dashboardSummary?.totalAccessibleProjects || 0}</span>
+          </div>
+          {isLoadingDashboard ? (
+            <p className={styles.empty}>Loading dashboard...</p>
+          ) : dashboardMessage ? (
+            <p className={styles.message}>{dashboardMessage}</p>
+          ) : dashboardSummary ? (
+            <div className={styles.metricGrid}>
+              {[
+                ["Projects", dashboardSummary.totalAccessibleProjects],
+                ["Active", dashboardSummary.activeProjects],
+                ["Completed", dashboardSummary.completedProjects],
+                ["Tasks", dashboardSummary.totalRelevantTasks],
+                ["Todo", dashboardSummary.todoTasks],
+                ["In progress", dashboardSummary.inProgressTasks],
+                ["Done", dashboardSummary.completedTasks],
+                ["Overdue", dashboardSummary.overdueTasks],
+                ["Assigned to me", dashboardSummary.assignedToMeTasks],
+                ["Due soon", dashboardSummary.upcomingDueTasks],
+              ].map(([label, value]) => (
+                <div className={styles.metricCard} key={label}>
+                  <strong>{value}</strong>
+                  <span>{label}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className={styles.empty}>No dashboard data yet.</p>
+          )}
+        </section>
+
+        <section className={styles.detailPanel}>
+          <div className={styles.listHeader}>
+            <h2>Notifications</h2>
+            <span>{unreadCount}</span>
+          </div>
+          {isLoadingNotifications ? (
+            <p className={styles.empty}>Loading notifications...</p>
+          ) : notifications.length ? (
+            <>
+              <button
+                type="button"
+                className={styles.secondaryAction}
+                disabled={unreadCount === 0}
+                onClick={handleMarkAllNotificationsRead}
+              >
+                Mark all read
+              </button>
+              <ul className={styles.notificationList}>
+                {notifications.map((notification) => (
+                  <li
+                    key={notification._id}
+                    className={notification.isRead ? "" : styles.unreadNotification}
+                  >
+                    <button type="button" onClick={() => handleMarkNotificationRead(notification)}>
+                      <strong>{notification.title}</strong>
+                      <span>{notification.message}</span>
+                    </button>
+                    {notification.project?._id ? (
+                      <button
+                        type="button"
+                        className={styles.secondaryAction}
+                        onClick={() => router.push(`/projects/${notification.project?._id}`)}
+                      >
+                        Open
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className={styles.empty}>No notifications yet.</p>
+          )}
+          {notificationMessage ? <p className={styles.message}>{notificationMessage}</p> : null}
+        </section>
+      </section>
+
       <section className={styles.content}>
         {canManageProjects ? (
           <ProjectForm
@@ -182,13 +330,25 @@ function Dashboard() {
             {message ? <p className={styles.message}>{message}</p> : null}
           </section>
         )}
-        <ProjectList
-          canManageProjects={canManageProjects}
-          isLoading={isLoading}
-          onStatusChange={handleUpdateProjectStatus}
-          projects={projects}
-          updatingProjectId={updatingProjectId}
-        />
+        <div className={styles.projectListColumn}>
+          <section className={styles.filterBand}>
+            <label>
+              <input
+                type="checkbox"
+                checked={showArchivedProjects}
+                onChange={(event) => setShowArchivedProjects(event.target.checked)}
+              />
+              Show archived projects
+            </label>
+          </section>
+          <ProjectList
+            canManageProjects={canManageProjects}
+            isLoading={isLoading}
+            onStatusChange={handleUpdateProjectStatus}
+            projects={projects}
+            updatingProjectId={updatingProjectId}
+          />
+        </div>
       </section>
 
       {canInvite ? (

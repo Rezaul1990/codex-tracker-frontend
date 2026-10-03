@@ -35,7 +35,7 @@ import { getUsers } from "@/lib/authApi";
 import type { AuthUser } from "@/types/auth";
 import type { Activity, Attachment, Comment } from "@/types/collaboration";
 import type { Project, ProjectStatus, ProjectUser } from "@/types/project";
-import type { Task, TaskPriority, TaskStatus } from "@/types/task";
+import type { Task, TaskPriority, TaskSearchFilters, TaskStatus } from "@/types/task";
 import styles from "../../page.module.css";
 
 const getUserId = (user: ProjectUser) => user.id || user._id || "";
@@ -100,6 +100,13 @@ function ProjectDetails() {
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [collaborationMessage, setCollaborationMessage] = useState("");
   const [isMentionPickerOpen, setIsMentionPickerOpen] = useState(false);
+  const [taskFilters, setTaskFilters] = useState<TaskSearchFilters>({
+    archived: "false",
+    limit: 50,
+    page: 1,
+    sort: "createdAt:desc",
+  });
+  const [taskTotal, setTaskTotal] = useState(0);
 
   const canManage = user?.role === "admin" || user?.role === "manager";
 
@@ -112,11 +119,30 @@ function ProjectDetails() {
     setDueDate(toDateInputValue(nextProject.dueDate));
   }, []);
 
+  const loadTasks = useCallback(async () => {
+    setIsLoadingTasks(true);
+    setTaskMessage("");
+
+    try {
+      const nextTaskResult = await getProjectTasks(projectId, taskFilters);
+
+      setTasks(nextTaskResult.data);
+      setTaskTotal(nextTaskResult.meta?.total || nextTaskResult.data.length);
+      setSelectedTaskId((currentTaskId) =>
+        nextTaskResult.data.some((task) => task._id === currentTaskId)
+          ? currentTaskId
+          : nextTaskResult.data[0]?._id || "",
+      );
+    } catch (error) {
+      setTaskMessage(error instanceof Error ? error.message : "Could not load tasks");
+    } finally {
+      setIsLoadingTasks(false);
+    }
+  }, [projectId, taskFilters]);
+
   const loadProject = useCallback(async () => {
     setIsLoading(true);
-    setIsLoadingTasks(true);
     setMessage("");
-    setTaskMessage("");
 
     try {
       const result = await getProject(projectId);
@@ -125,21 +151,17 @@ function ProjectDetails() {
         hydrateForm(result);
       }
 
-      const [nextTasks, nextAttachments, nextActivities] = await Promise.all([
-        getProjectTasks(projectId),
+      const [nextAttachments, nextActivities] = await Promise.all([
         getProjectAttachments(projectId),
         getProjectActivities(projectId),
       ]);
 
-      setTasks(nextTasks);
       setProjectAttachments(nextAttachments);
       setActivities(nextActivities);
-      setSelectedTaskId((currentTaskId) => currentTaskId || nextTasks[0]?._id || "");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not load project");
     } finally {
       setIsLoading(false);
-      setIsLoadingTasks(false);
     }
   }, [hydrateForm, projectId]);
 
@@ -150,6 +172,14 @@ function ProjectDetails() {
 
     return () => window.clearTimeout(timer);
   }, [loadProject]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadTasks();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadTasks]);
 
   useEffect(() => {
     if (!selectedTaskId) {
@@ -404,6 +434,23 @@ function ProjectDetails() {
     } catch (error) {
       setTaskMessage(error instanceof Error ? error.message : "Could not archive task");
     }
+  };
+
+  const handleTaskFilterChange = (nextFilters: Partial<TaskSearchFilters>) => {
+    setTaskFilters((currentFilters) => ({
+      ...currentFilters,
+      ...nextFilters,
+      page: 1,
+    }));
+  };
+
+  const clearTaskFilters = () => {
+    setTaskFilters({
+      archived: "false",
+      limit: 50,
+      page: 1,
+      sort: "createdAt:desc",
+    });
   };
 
   const refreshActivities = async () => {
@@ -715,7 +762,7 @@ function ProjectDetails() {
       <section className={styles.taskWorkspace}>
         <div className={styles.listHeader}>
           <h2>Tasks</h2>
-          <span>{tasks.length}</span>
+          <span>{taskTotal}</span>
         </div>
 
         <div className={`${styles.taskGrid} ${!canManage ? styles.taskGridFull : ""}`}>
@@ -808,6 +855,104 @@ function ProjectDetails() {
               !canManage ? styles.fullWidthPanel : ""
             }`}
           >
+            <section className={styles.filterPanel}>
+              <label>
+                Search
+                <input
+                  value={taskFilters.search || ""}
+                  onChange={(event) => handleTaskFilterChange({ search: event.target.value })}
+                  placeholder="Search title or description"
+                />
+              </label>
+              <label>
+                Status
+                <select
+                  value={taskFilters.status || ""}
+                  onChange={(event) =>
+                    handleTaskFilterChange({ status: event.target.value as TaskSearchFilters["status"] })
+                  }
+                >
+                  <option value="">Any status</option>
+                  <option value="todo">Todo</option>
+                  <option value="in-progress">In progress</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </label>
+              <label>
+                Priority
+                <select
+                  value={taskFilters.priority || ""}
+                  onChange={(event) =>
+                    handleTaskFilterChange({ priority: event.target.value as TaskSearchFilters["priority"] })
+                  }
+                >
+                  <option value="">Any priority</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+              <label>
+                Assignee
+                <select
+                  value={taskFilters.assignee || ""}
+                  onChange={(event) => handleTaskFilterChange({ assignee: event.target.value })}
+                >
+                  <option value="">Anyone</option>
+                  <option value="unassigned">Unassigned</option>
+                  {memberOptions.map((member) => (
+                    <option key={getUserId(member)} value={getUserId(member)}>
+                      {member.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Due from
+                <input
+                  type="date"
+                  value={taskFilters.dueFrom || ""}
+                  onChange={(event) => handleTaskFilterChange({ dueFrom: event.target.value })}
+                />
+              </label>
+              <label>
+                Due to
+                <input
+                  type="date"
+                  value={taskFilters.dueTo || ""}
+                  onChange={(event) => handleTaskFilterChange({ dueTo: event.target.value })}
+                />
+              </label>
+              <label>
+                Archived
+                <select
+                  value={taskFilters.archived || "false"}
+                  onChange={(event) =>
+                    handleTaskFilterChange({ archived: event.target.value as TaskSearchFilters["archived"] })
+                  }
+                >
+                  <option value="false">Active only</option>
+                  <option value="true">Active and archived</option>
+                  <option value="only">Archived only</option>
+                </select>
+              </label>
+              <label>
+                Sort
+                <select
+                  value={taskFilters.sort || "createdAt:desc"}
+                  onChange={(event) => handleTaskFilterChange({ sort: event.target.value })}
+                >
+                  <option value="createdAt:desc">Newest</option>
+                  <option value="dueDate:asc">Due date</option>
+                  <option value="priority:desc">Priority</option>
+                  <option value="status:asc">Status</option>
+                  <option value="title:asc">Title</option>
+                </select>
+              </label>
+              <button type="button" onClick={clearTaskFilters}>
+                Clear
+              </button>
+            </section>
             {isLoadingTasks ? (
               <p className={styles.empty}>Loading tasks...</p>
             ) : tasks.length === 0 ? (
@@ -830,6 +975,7 @@ function ProjectDetails() {
                       <tr key={task._id}>
                         <td>
                           <strong>{task.title}</strong>
+                          {task.archivedAt ? <span className={styles.archiveBadge}>Archived</span> : null}
                           <span>{task.description || "No description."}</span>
                           <button type="button" onClick={() => setSelectedTaskId(task._id)}>
                             Open

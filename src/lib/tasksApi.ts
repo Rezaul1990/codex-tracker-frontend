@@ -1,14 +1,40 @@
 import { apiRequest } from "@/lib/apiClient";
-import type { CreateTaskInput, Task, TaskStatus, UpdateTaskInput } from "@/types/task";
+import type {
+  CreateTaskInput,
+  PaginatedTasks,
+  Task,
+  TaskSearchFilters,
+  TaskStatus,
+  UpdateTaskInput,
+} from "@/types/task";
 
-export const getProjectTasks = async (projectId: string, includeArchived = false) => {
-  const result = await apiRequest<Task[]>(
-    includeArchived
-      ? `/api/projects/${projectId}/tasks?archived=true`
-      : `/api/projects/${projectId}/tasks`,
-  );
+const buildTaskQuery = (filters: TaskSearchFilters = {}) => {
+  const query = new URLSearchParams();
 
-  return result.data || [];
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      query.set(key, String(value));
+    }
+  });
+
+  return query.toString();
+};
+
+export const getProjectTasks = async (
+  projectId: string,
+  includeArchivedOrFilters: boolean | TaskSearchFilters = false,
+) => {
+  const filters =
+    typeof includeArchivedOrFilters === "boolean"
+      ? ({ archived: includeArchivedOrFilters ? "true" : "false" } satisfies TaskSearchFilters)
+      : includeArchivedOrFilters;
+  const query = buildTaskQuery(filters);
+  const result = await apiRequest<Task[]>(`/api/projects/${projectId}/tasks${query ? `?${query}` : ""}`);
+
+  return {
+    data: result.data || [],
+    meta: (result as PaginatedTasks).meta,
+  } satisfies PaginatedTasks;
 };
 
 export const createTask = async (projectId: string, input: CreateTaskInput) => {
